@@ -6,7 +6,7 @@ local transferEnabled = false
 term.setCursorPos(17, 6)
 term.setTextColor(colors.red)
 term.write("Initializing...")
-sleep(1)
+sleep(1)    
 term.clear()
 term.setTextColor(colors.red)
 
@@ -80,6 +80,30 @@ local function processConPeripherals(task, sourceNames, destP)
         table.insert(errorMessages, err)
     end
 
+    local destSlots = {}
+    local destItems = destP.list and destP.list()
+    local destSize = destP.size and destP.size()
+    if destItems and destSize then
+        if task.destinationSlotRange == "all" then
+            for slotIndex = 1, destSize do
+                table.insert(destSlots, slotIndex)
+            end
+        elseif type(task.destinationSlotRange) == "table" then
+            local indexStart = task.destinationSlotRange[1]
+            local indexEnd = task.destinationSlotRange[2]
+            for slotIndex = indexStart, indexEnd do
+                if slotIndex >=1 and slotIndex <= destSize then
+                    table.insert(destSlots, slotIndex)
+                end
+            end
+        end
+    else
+        table.insert(errorMessages, "Err: unable to get slots from destination peripheral " .. nameFormatter(peripheral.getName(destP)))
+        return 0, errorMessages
+    end
+
+    local destSlotIndex = 1
+
     for _, sourceName in ipairs(sourceNames) do
         local sourceP = sources[sourceName]
         if not sourceP then
@@ -91,13 +115,13 @@ local function processConPeripherals(task, sourceNames, destP)
         local slotsToProcess = {}
 
         if items then
-            if task.slotRange == "all" then
+            if task.sourceSlotRange == "all" then
                 for slotIndex, item in pairs(items) do
                     table.insert(slotsToProcess, { slot = slotIndex, count = item.count })
                 end
-            elseif type(task.slotRange) == "table" then
-                local indexStart = task.slotRange[1]
-                local indexEnd = task.slotRange[2]
+            elseif type(task.sourceSlotRange) == "table" then
+                local indexStart = task.sourceSlotRange[1]
+                local indexEnd = task.sourceSlotRange[2]
                 for slotIndex = indexStart, indexEnd do
                     if items[slotIndex] then
                         table.insert(slotsToProcess, { slot = slotIndex, count = items[slotIndex].count })
@@ -110,11 +134,20 @@ local function processConPeripherals(task, sourceNames, destP)
             local batchTasks = {}
             for _, slotInfo in ipairs(slotsToProcess) do
                 table.insert(batchTasks, function()
-                    local transCount = sourceP.pushItems(peripheral.getName(destP), slotInfo.slot, slotInfo.count)
+                    local destSlot = destSlots[destSlotIndex]
+                    if not destSlot then
+                        destSlotIndex = 1
+                        destSlot = destSlots[destSlotIndex]
+                    end
+
+                    local transCount = sourceP.pushItems(peripheral.getName(destP), slotInfo.slot, slotInfo.count, destSlot)
                     if transCount > 0 then
                         numTransferRun = numTransferRun + transCount
-                    else
-                        table.insert(errorMessages, "Err: unable to push items from " .. nameFormatter(sourceName) .. " slot " .. slotInfo.slot)
+                    end
+
+                    destSlotIndex = destSlotIndex + 1
+                    if destSlotIndex > #destSlots then
+                        destSlotIndex = 1
                     end
                 end)
             end
@@ -125,8 +158,6 @@ local function processConPeripherals(task, sourceNames, destP)
             local transCount = sourceP.pushFluid(peripheral.getName(destP))
             if transCount > 0 then
                 numTransferRun = numTransferRun + transCount
-            else
-                table.insert(errorMessages, "Err: unable to push fluids from " .. nameFormatter(sourceName))
             end
         end
     end
